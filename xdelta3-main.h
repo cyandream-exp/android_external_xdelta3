@@ -1,6 +1,6 @@
 /* xdelta3 - delta compression tools and library
  * Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
- * 2009, 2010, 2011, 2012 Joshua P. MacDonald
+ * 2009, 2010, 2011, 2012, 2013 Joshua P. MacDonald
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -348,15 +348,16 @@ xprintf (const char *fmt, ...)
   if (xprintf_message_func != NULL) {
     xprintf_message_func(buf);
   } else {
-    fwrite(buf, 1, size, stderr);
+    size_t ignore = fwrite(buf, 1, size, stderr);
+    (void) ignore;
   }
 }
 
 static int
 main_version (void)
 {
-  /* $Format: "  XPR(NTR \"Xdelta version $Xdelta3Version$, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, Joshua MacDonald\\n\");" $ */
-  XPR(NTR "Xdelta version 3.0.5, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, Joshua MacDonald\n");
+  /* $Format: "  XPR(NTR \"Xdelta version $Xdelta3Version$, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, 2013, Joshua MacDonald\\n\");" $ */
+  XPR(NTR "Xdelta version 3.0.7, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, 2013 Joshua MacDonald\n");
   XPR(NTR "Xdelta comes with ABSOLUTELY NO WARRANTY.\n");
   XPR(NTR "This is free software, and you are welcome to redistribute it\n");
   XPR(NTR "under certain conditions; see \"COPYING\" for details.\n");

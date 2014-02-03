@@ -1,6 +1,6 @@
 /* xdelta 3 - delta compression tools and library
  * Copyright (C) 2001, 2003, 2004, 2005, 2006, 2007,
- * 2008, 2009, 2010.  Joshua P. MacDonald
+ * 2008, 2009, 2010, 2011, 2012, 2013.  Joshua P. MacDonald
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -160,7 +160,11 @@ typedef uint64_t xoff_t;
 #define SIZEOF_XOFF_T 8
 #define SIZEOF_USIZE_T 4
 #ifndef WIN32
+#if SIZEOF_SIZE_T == 8
+#define Q "z"
+#else
 #define Q "ll"
+#endif
 #else
 #define Q "I64"
 #endif
