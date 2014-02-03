@@ -1,6 +1,6 @@
 /* xdelta3 - delta compression tools and library
  * Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008,
- * 2009, 2010, 2011, 2012 Joshua P. MacDonald
+ * 2009, 2010, 2011, 2012, 2013 Joshua P. MacDonald
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -250,7 +250,10 @@ static const char *option_source_filename    = NULL;
 static int         option_level              = XD3_DEFAULT_LEVEL;
 static usize_t     option_iopt_size          = XD3_DEFAULT_IOPT_SIZE;
 static usize_t     option_winsize            = XD3_DEFAULT_WINSIZE;
-static size_t      option_srcwinsz           = XD3_DEFAULT_SRCWINSZ;
+/* Note: option_srcwinsz is restricted from [16Kb, 4Gb], because
+ * addresses in the large hash checksum are 32 bits.  The flag is read
+ * as xoff_t, so that 4Gb != 0. */
+static xoff_t      option_srcwinsz           = XD3_DEFAULT_SRCWINSZ;
 static usize_t     option_sprevsz            = XD3_DEFAULT_SPREVSZ;
 
 /* These variables are supressed to avoid their use w/o support.  main() warns
@@ -293,10 +296,7 @@ static main_extcomp extcomp_types[] =
   { "gzip",     "-c",   "gzip",       "-dc",   "G", "\037\213",     2, 0 },
   { "compress", "-c",   "uncompress", "-c",    "Z", "\037\235",     2, 0 },
 
-  /* TODO: add commandline support for magic-less formats */
-  /*{ "lzma", "-c",   "lzma", "-dc",   "M", "]\000", 2, 0 },*/
-
-  /* Xz is lzma with a magic number http://tukaani.org/xz/ */
+  /* Xz is lzma with a magic number http://tukaani.org/xz/format.html */
   { "xz", "-c", "xz", "-dc", "Y", "\xfd\x37\x7a\x58\x5a\x00", 2, 0 },
 };
 
@@ -315,15 +315,16 @@ static int main_file_stat (main_file *xfile, xoff_t *size);
 static int main_file_seek (main_file *xfile, xoff_t pos);
 static int main_read_primary_input (main_file   *file,
 				    uint8_t     *buf,
-				    usize_t      size,
-				    usize_t     *nread);
+				    size_t       size,
+				    size_t      *nread);
 
 static const char* main_format_bcnt (xoff_t r, shortbuf *buf);
 static int main_help (void);
 
+#if XD3_ENCODER
 static int xd3_merge_input_output (xd3_stream *stream,
 				   xd3_whole_state *source);
-
+#endif
 
 /* The code in xdelta3-blk.h is essentially part of this unit, see
  * comments there. */
@@ -348,15 +349,16 @@ xprintf (const char *fmt, ...)
   if (xprintf_message_func != NULL) {
     xprintf_message_func(buf);
   } else {
-    fwrite(buf, 1, size, stderr);
+    size_t ignore = fwrite(buf, 1, size, stderr);
+    (void) ignore;
   }
 }
 
 static int
 main_version (void)
 {
-  /* $Format: "  XPR(NTR \"Xdelta version $Xdelta3Version$, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, Joshua MacDonald\\n\");" $ */
-  XPR(NTR "Xdelta version 3.0.5, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, Joshua MacDonald\n");
+  /* $Format: "  XPR(NTR \"Xdelta version $Xdelta3Version$, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, 2013, Joshua MacDonald\\n\");" $ */
+  XPR(NTR "Xdelta version 3.0.8, Copyright (C) 2007, 2008, 2009, 2010, 2011, 2012, 2013 Joshua MacDonald\n");
   XPR(NTR "Xdelta comes with ABSOLUTELY NO WARRANTY.\n");
   XPR(NTR "This is free software, and you are welcome to redistribute it\n");
   XPR(NTR "under certain conditions; see \"COPYING\" for details.\n");
@@ -374,6 +376,7 @@ main_config (void)
   XPR(NTR "REGRESSION_TEST=%d\n", REGRESSION_TEST);
   XPR(NTR "SECONDARY_DJW=%d\n", SECONDARY_DJW);
   XPR(NTR "SECONDARY_FGK=%d\n", SECONDARY_FGK);
+  XPR(NTR "SECONDARY_LZMA=%d\n", SECONDARY_LZMA);
   XPR(NTR "UNALIGNED_OK=%d\n", UNALIGNED_OK);
   XPR(NTR "VCDIFF_TOOLS=%d\n", VCDIFF_TOOLS);
   XPR(NTR "XD3_ALLOCSIZE=%d\n", XD3_ALLOCSIZE);
@@ -880,6 +883,7 @@ main_file_open (main_file *xfile, const char* name, int mode)
   ret = (xfile->file == NULL) ? get_errno () : 0;
 
 #elif XD3_POSIX
+  /* TODO: Should retry this call if interrupted, similar to read/write */
   if ((ret = open (name, XOPEN_POSIX, XOPEN_MODE)) < 0)
     {
       ret = get_errno ();
@@ -970,15 +974,16 @@ main_file_exists (main_file *xfile)
 typedef int (xd3_posix_func) (int fd, uint8_t *buf, usize_t size);
 
 static int
-xd3_posix_io (int fd, uint8_t *buf, usize_t size,
-	      xd3_posix_func *func, usize_t *nread)
+xd3_posix_io (int fd, uint8_t *buf, size_t size,
+	      xd3_posix_func *func, size_t *nread)
 {
   int ret;
-  usize_t nproc = 0;
+  size_t nproc = 0;
 
   while (nproc < size)
     {
-      int result = (*func) (fd, buf + nproc, size - nproc);
+      size_t tryread = min(size - nproc, 1U << 30);
+      ssize_t result = (*func) (fd, buf + nproc, tryread);
 
       if (result < 0)
 	{
@@ -1001,18 +1006,19 @@ xd3_posix_io (int fd, uint8_t *buf, usize_t size,
 
 #if XD3_WIN32
 static int
-xd3_win32_io (HANDLE file, uint8_t *buf, usize_t size,
-	      int is_read, usize_t *nread)
+xd3_win32_io (HANDLE file, uint8_t *buf, size_t size,
+	      int is_read, size_t *nread)
 {
   int ret = 0;
-  usize_t nproc = 0;
+  size_t nproc = 0;
 
   while (nproc < size)
     {
-      DWORD nproc2;
+      DWORD nproc2 = 0;  /* hmm */
+	  DWORD nremain = size - nproc;
       if ((is_read ?
-	   ReadFile (file, buf + nproc, size - nproc, &nproc2, NULL) :
-	   WriteFile (file, buf + nproc, size - nproc, &nproc2, NULL)) == 0)
+	   ReadFile (file, buf + nproc, nremain, &nproc2, NULL) :
+	   WriteFile (file, buf + nproc, nremain, &nproc2, NULL)) == 0)
 	{
 	  ret = get_errno();
 	  if (ret != ERROR_HANDLE_EOF && ret != ERROR_BROKEN_PIPE)
@@ -1023,7 +1029,7 @@ xd3_win32_io (HANDLE file, uint8_t *buf, usize_t size,
 	   * read case in case of eof or broken pipe. */
 	}
 
-      nproc += (usize_t) nproc2;
+      nproc += nproc2;
 
       if (nread != NULL && nproc2 == 0) { break; }
     }
@@ -1037,14 +1043,14 @@ xd3_win32_io (HANDLE file, uint8_t *buf, usize_t size,
 int
 main_file_read (main_file  *ifile,
 		uint8_t    *buf,
-		usize_t     size,
-		usize_t    *nread,
+		size_t      size,
+		size_t     *nread,
 		const char *msg)
 {
   int ret = 0;
 
 #if XD3_STDIO
-  usize_t result;
+  size_t result;
 
   result = fread (buf, 1, size, ifile->file);
 
@@ -1069,7 +1075,7 @@ main_file_read (main_file  *ifile,
     }
   else
     {
-      if (option_verbose > 4) { XPR(NT "read %s: %u bytes\n",
+      if (option_verbose > 4) { XPR(NT "read %s: %zu bytes\n",
 				    ifile->filename, (*nread)); }
       ifile->nread += (*nread);
     }
@@ -1103,7 +1109,7 @@ main_file_write (main_file *ofile, uint8_t *buf, usize_t size, const char *msg)
     }
   else
     {
-      if (option_verbose > 4) { XPR(NT "write %s: %u bytes\n",
+      if (option_verbose > 5) { XPR(NT "write %s: %u bytes\n",
 				    ofile->filename, size); }
       ofile->nwrite += size;
     }
@@ -1300,7 +1306,7 @@ main_print_window (xd3_stream* stream, main_file *xfile)
 	 option_print_cpymode ? code : 0,
 	 xd3_rtype_to_string ((xd3_rtype) stream->dec_current1.type,
 			      option_print_cpymode),
-	 (usize_t) stream->dec_current1.size)VE;
+	 stream->dec_current1.size)VE;
 
       if (stream->dec_current1.type != XD3_NOOP)
 	{
@@ -1330,7 +1336,7 @@ main_print_window (xd3_stream* stream, main_file *xfile)
 	  VC(UT "  %s %6u",
 	     xd3_rtype_to_string ((xd3_rtype) stream->dec_current2.type,
 				  option_print_cpymode),
-	     (usize_t)stream->dec_current2.size)VE;
+	     stream->dec_current2.size)VE;
 
 	  if (stream->dec_current2.type >= XD3_CPY)
 	    {
@@ -2188,11 +2194,11 @@ main_external_compression_cleanup (void)
  * input is copied out of the existing buffer, then the buffer is
  * reused to continue reading from the compressed input file. */
 static int
-main_pipe_copier (uint8_t    *pipe_buf,
+main_pipe_copier (uint8_t     *pipe_buf,
 		  usize_t      pipe_bufsize,
-		  usize_t      nread,
+		  size_t       nread,
 		  main_file   *ifile,
-		  int         outfd)
+		  int          outfd)
 {
   int ret;
   xoff_t skipped = 0;
@@ -2260,7 +2266,7 @@ main_input_decompress_setup (const main_extcomp   *decomp,
 			     uint8_t              *pipe_buf,
 			     usize_t               pipe_bufsize,
 			     usize_t               pipe_avail,
-			     usize_t              *nread)
+			     size_t               *nread)
 {
   /* The two pipes: input and output file descriptors. */
   int outpipefd[2], inpipefd[2];
@@ -2407,13 +2413,13 @@ main_input_decompress_setup (const main_extcomp   *decomp,
 static int
 main_secondary_decompress_check (main_file  *file,
 				 uint8_t    *input_buf,
-				 usize_t     input_size,
-				 usize_t    *nread)
+				 size_t      input_size,
+				 size_t     *nread)
 {
   int ret;
   usize_t i;
   usize_t try_read = min (input_size, XD3_ALLOCSIZE);
-  usize_t check_nread;
+  size_t  check_nread = 0;
   uint8_t check_buf[XD3_ALLOCSIZE];  /* TODO: stack limit */
   const main_extcomp *decompressor = NULL;
 
@@ -2848,8 +2854,8 @@ main_get_appheader (xd3_stream *stream, main_file *ifile,
 static int
 main_read_primary_input (main_file   *file,
 			 uint8_t     *buf,
-			 usize_t      size,
-			 usize_t     *nread)
+			 size_t       size,
+			 size_t      *nread)
 {
 #if EXTERNAL_COMPRESSION
   if (option_decompress_inputs && file->flags & RD_FIRST)
@@ -2967,7 +2973,7 @@ main_input (xd3_cmd     cmd,
 {
   int        ret;
   xd3_stream stream;
-  usize_t    nread = 0;
+  size_t     nread = 0;
   usize_t    winsize;
   int        stream_flags = 0;
   xd3_config config;
@@ -3291,7 +3297,7 @@ main_input (xd3_cmd     cmd,
 
 		    /* Limited i-buffer size affects source copies
 		     * when the sourcewin is decided early. */
-		    if (option_verbose &&
+		    if (option_verbose > 1 &&
 			stream.srcwin_decided_early &&
 			stream.i_slots_used > stream.iopt_size)
 		      {
@@ -3770,7 +3776,7 @@ int main (int argc, char **argv)
 	case 'B': {
 	  xoff_t bsize;
 	  if ((ret = main_atoux (my_optarg, & bsize,
-				 XD3_MINSRCWINSZ, 0, 'B')))
+				 XD3_MINSRCWINSZ, XD3_MAXSRCWINSZ, 'B')))
 	    {
 	      goto exit;
 	    }

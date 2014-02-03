@@ -35,11 +35,12 @@ int xd3_whole_append_window (xd3_stream *stream);
 int xd3_main_cmdline (int argc, char **argv);
 int main_file_read (main_file  *ifile,
 		    uint8_t    *buf,
-		    usize_t     size,
-		    usize_t    *nread,
+		    size_t     size,
+		    size_t    *nread,
 		    const char *msg);
 int main_file_write (main_file *ofile, uint8_t *buf, 
 		     usize_t size, const char *msg);
+int test_compare_files (const char* f0, const char* f1);
 usize_t xd3_bytes_on_srcblk (xd3_source *src, xoff_t blkno);
 xoff_t xd3_source_eof(const xd3_source *src);
 uint32_t xd3_large_cksum_update (uint32_t cksum,

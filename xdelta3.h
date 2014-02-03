@@ -1,6 +1,6 @@
 /* xdelta 3 - delta compression tools and library
  * Copyright (C) 2001, 2003, 2004, 2005, 2006, 2007,
- * 2008, 2009, 2010.  Joshua P. MacDonald
+ * 2008, 2009, 2010, 2011, 2012, 2013.  Joshua P. MacDonald
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -110,7 +110,6 @@
  */
 #ifndef _WIN32
 #include <stdint.h>
-typedef unsigned int usize_t;
 #else
 #define WIN32_LEAN_AND_MEAN
 #if XD3_USE_LARGEFILE64
@@ -125,7 +124,6 @@ typedef unsigned int usize_t;
 #define _WIN32_WINNT	0x0400
 #endif
 #include <windows.h>
-typedef unsigned int   usize_t;
 #ifdef _MSC_VER
 #define inline
 typedef signed int     ssize_t;
@@ -144,9 +142,8 @@ typedef ULONGLONG      uint64_t;
 #endif
 #endif
 
-/* TODO: note that SIZEOF_USIZE_T is never set to 8, although it should be for
- * a 64bit platform.  OTOH, may be that using 32bits is appropriate even on a
- * 64bit platform because we allocate large arrays of these values. */
+typedef uint32_t usize_t;
+
 #if XD3_USE_LARGEFILE64
 #define __USE_FILE_OFFSET64 1 /* GLIBC: for 64bit fileops, ... ? */
 #ifndef _LARGEFILE_SOURCE
@@ -160,7 +157,11 @@ typedef uint64_t xoff_t;
 #define SIZEOF_XOFF_T 8
 #define SIZEOF_USIZE_T 4
 #ifndef WIN32
+#if SIZEOF_SIZE_T == 8
+#define Q "z"
+#else
 #define Q "ll"
+#endif
 #else
 #define Q "I64"
 #endif

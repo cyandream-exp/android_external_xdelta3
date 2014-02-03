@@ -1,7 +1,7 @@
 ACLOCAL_AMFLAGS = -I m4
 
 bin_PROGRAMS = xdelta3
-noinst_PROGRAMS = xdelta3regtest
+noinst_PROGRAMS = xdelta3regtest xdelta3decode
 
 common_SOURCES = \
 	  xdelta3-blkcache.h \
@@ -21,6 +21,8 @@ common_SOURCES = \
 
 xdelta3_SOURCES = $(common_SOURCES) xdelta3.c
 
+xdelta3decode_SOURCES = $(common_SOURCES) xdelta3.c
+
 xdelta3regtest_SOURCES = $(common_SOURCES) \
 	testing/cmp.h \
 	testing/delta.h \
@@ -33,8 +35,14 @@ xdelta3regtest_SOURCES = $(common_SOURCES) \
 	testing/sizes.h \
 	testing/test.h
 
+# Note: for extra sanity checks, enable -Wconversion. Note there
+# are a lot of false positives.
 WFLAGS = -Wall -Wshadow -fno-builtin -Wextra -Wsign-compare \
 	 -Wextra -Wno-unused-parameter
+
+C_WFLAGS = $(WFLAGS) -pedantic -std=c99
+CXX_WFLAGS = $(WFLAGS)
+
 common_CFLAGS = \
 	      -DGENERIC_ENCODE_TABLES=0 \
 	      -DREGRESSION_TEST=1 \
@@ -44,11 +52,32 @@ common_CFLAGS = \
 	      -DXD3_USE_LARGEFILE64=1 \
 	      -DXD3_MAIN=1
 
-xdelta3_CFLAGS = $(WFLAGS) $(common_CFLAGS) -pedantic -std=c99
+if DEBUG_SYMBOLS
+  common_CFLAGS += -g
+endif
+
+# For additional debugging, add -DXD3_DEBUG=1, 2, 3, ...
+xdelta3_CFLAGS = $(C_WFLAGS) $(common_CFLAGS) -DXD3_DEBUG=0
 xdelta3_LDADD = -lm
 
-xdelta3regtest_CXXFLAGS = $(WFLAGS) $(common_CFLAGS) -DNOT_MAIN=1 -DXD3_DEBUG=1
-xdelta3regtest_CFLAGS = $(WFLAGS) $(common_CFLAGS) -DNOT_MAIN=1 -DXD3_DEBUG=1
+xdelta3decode_CFLAGS = \
+	$(C_WFLAGS) \
+	-DGENERIC_ENCODE_TABLES=0 \
+	-DREGRESSION_TEST=0 \
+	-DSECONDARY_DJW=0 \
+	-DSECONDARY_FGK=0 \
+	-DSECONDARY_LZMA=0 \
+	-DXD3_USE_LARGEFILE64=1 \
+	-DXD3_MAIN=1 \
+	-DXD3_ENCODER=0 \
+	-DXD3_STDIO=1 \
+	-DEXTERNAL_COMPRESSION=0 \
+	-DVCDIFF_TOOLS=0
+
+xdelta3regtest_CXXFLAGS = \
+	$(CXX_WFLAGS) $(common_CFLAGS) -DNOT_MAIN=1 -DXD3_DEBUG=1
+xdelta3regtest_CFLAGS = \
+	$(C_WFLAGS) $(common_CFLAGS) -DNOT_MAIN=1 -DXD3_DEBUG=1
 xdelta3regtest_LDADD = -lm
 
 man1_MANS = xdelta3.1
